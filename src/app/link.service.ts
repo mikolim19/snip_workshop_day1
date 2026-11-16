@@ -13,7 +13,7 @@ export interface SnipLink {
 @Injectable({ providedIn: 'root' })
 export class LinkService {
   private readonly http = inject(HttpClient);
-  private readonly apiUrl = 'http://localhost:3000/api/links';
+  private readonly apiUrl = '/api/links';
 
   getLinks(): Observable<SnipLink[]> {
     return this.http.get<SnipLink[]>(this.apiUrl);

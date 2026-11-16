@@ -20,7 +20,7 @@ describe('AppComponent', () => {
   it('rejects non-http(s) URLs without sending a request', () => {
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
-    http.expectOne('http://localhost:3000/api/links').flush([]);
+    http.expectOne('/api/links').flush([]);
 
     fixture.componentInstance.linkForm.controls.url.setValue('ftp://example.com/file');
     fixture.componentInstance.submit();
@@ -28,13 +28,13 @@ describe('AppComponent', () => {
 
     expect(fixture.componentInstance.linkForm.controls.url.invalid).toBeTrue();
     expect(fixture.nativeElement.textContent).toContain('Enter a valid http:// or https:// URL');
-    http.expectNone('http://localhost:3000/api/links');
+    http.expectNone('/api/links');
   });
 
   it('creates a link and refreshes the links table', () => {
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
-    http.expectOne('http://localhost:3000/api/links').flush([]);
+    http.expectOne('/api/links').flush([]);
 
     const link: SnipLink = {
       code: 'a1B2c3',
@@ -46,11 +46,11 @@ describe('AppComponent', () => {
     fixture.componentInstance.linkForm.controls.url.setValue(link.url);
     fixture.componentInstance.submit();
 
-    const createRequest = http.expectOne('http://localhost:3000/api/links');
+    const createRequest = http.expectOne('/api/links');
     expect(createRequest.request.method).toBe('POST');
     expect(createRequest.request.body).toEqual({ url: link.url });
     createRequest.flush(link);
-    http.expectOne('http://localhost:3000/api/links').flush([link]);
+    http.expectOne('/api/links').flush([link]);
     fixture.detectChanges();
 
     expect(fixture.componentInstance.createdShortUrl()).toBe(link.shortUrl);
@@ -62,11 +62,11 @@ describe('AppComponent', () => {
   it('shows a server validation error beside the URL field', () => {
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
-    http.expectOne('http://localhost:3000/api/links').flush([]);
+    http.expectOne('/api/links').flush([]);
     fixture.componentInstance.linkForm.controls.url.setValue('https://example.com');
     fixture.componentInstance.submit();
 
-    http.expectOne('http://localhost:3000/api/links').flush(
+    http.expectOne('/api/links').flush(
       { error: 'URL was rejected' },
       { status: 400, statusText: 'Bad Request' }
     );

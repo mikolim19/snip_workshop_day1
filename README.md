@@ -14,6 +14,7 @@ component commits, not floating branch names.
 | `backend` | Bun 1.x API, `server.js`, no npm dependencies |
 | `frontend` | Angular 19 standalone app and typed HttpClient service |
 | `cli` | CommonJS `cli.js`, Node 20+ global fetch, shell wrappers |
+| `bundle` | GENERATED server, built UI, CLI, Dockerfile and Railway configuration |
 | `main` | Submodule pointers, documentation, release tooling and CI |
 
 ## Shared API
@@ -86,3 +87,44 @@ git push origin HEAD:main
 Submodules may be checked out with detached HEADs; use an explicit destination
 such as `HEAD:backend` when pushing. `git submodule update --init --recursive`
 restores the pinned snapshot; `--remote` intentionally advances it.
+
+## Generated release
+
+`bundle/` is generated output, never a source-editing location. From a clean
+`main` checkout:
+
+```powershell
+node scripts/build-bundle.mjs
+node scripts/build-bundle.mjs
+node scripts/build-bundle.mjs --push
+node scripts/smoke-test.mjs
+```
+
+The script advances source submodules to their branch tips, restores the exact
+frontend lockfile with `npm ci`, builds `dist/snip-frontend/browser`, and copies
+the server and CLI unchanged. It records source SHAs in `bundle/sources.json`,
+commits changed output and pointers only, and pushes explicit `HEAD:bundle` and
+`HEAD:main` destinations only with `--push`. Repeated identical builds do not
+create commits. A lock prevents concurrent builds, dirty component checkouts
+and unrelated main changes are rejected, and divergent bundle history fails
+rather than overwriting a release. Stop all component writers during a build.
+If a process is forcibly terminated, inspect the workspace before removing its
+stale `.release-build.lock`.
+
+The web app uses same-origin API requests. The Angular development server proxies
+`/api` to localhost:3000; a deployed bundle needs no localhost-specific UI config.
+One process serves the whole release:
+
+```powershell
+cd bundle
+bun start
+# In a separate terminal, from bundle:
+docker build -t snip .
+docker run --rm -p 3000:3000 snip
+```
+
+Open http://localhost:3000. The Docker runtime uses the unprivileged `bun` user.
+To deploy on Railway, choose the `bundle` branch, not `main`; the generated
+`railway.json` selects its Dockerfile and `/api/links` health check. Railway injects
+`PORT` and `RAILWAY_PUBLIC_DOMAIN`; set `BASE_URL` only to override the public
+origin. No external Railway deployment or paid resource is created by this repo.

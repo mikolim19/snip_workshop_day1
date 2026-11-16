@@ -128,3 +128,40 @@ To deploy on Railway, choose the `bundle` branch, not `main`; the generated
 `railway.json` selects its Dockerfile and `/api/links` health check. Railway injects
 `PORT` and `RAILWAY_PUBLIC_DOMAIN`; set `BASE_URL` only to override the public
 origin. No external Railway deployment or paid resource is created by this repo.
+
+## Release automation and security
+
+`.github/workflows/bundle.yml` rebuilds hourly and on manual dispatch. Set GitHub's
+default branch to `main`: schedules and workflow discovery use that branch. There
+is intentionally no push trigger: source branches do not contain the main-only
+workflow. It verifies the assembled release before pushing and skips empty commits.
+GitHub suppresses push-triggered workflows for `GITHUB_TOKEN` pushes, so a changed
+automated release explicitly dispatches the Docker workflow with `actions: write`.
+
+`.github/workflows/docker.yml` runs for pushes to `main` changing the `bundle`
+gitlink or the workflow itself, and on manual dispatch. It never advances source
+branches: all checks and the Docker build use the exact recorded submodule SHAs.
+Independent jobs test the frontend/API/CLI and build, smoke-test and Trivy-scan
+the image. High/critical production dependency or image findings block publication,
+including unfixed image findings. Actions are pinned by commit SHA. Only the
+publish job can write packages; it loads the already-tested image artifact rather
+than rebuilding it after the scan.
+
+Successful runs publish:
+
+```text
+ghcr.io/mikolim19/snip_workshop_day1:latest
+ghcr.io/mikolim19/snip_workshop_day1:sha-<short-main-sha>
+```
+
+These are intended tags, not evidence that a publish succeeded. Check the
+[Actions runs](https://github.com/mikolim19/snip_workshop_day1/actions) for results.
+The first GHCR package may be private; change package visibility if anonymous
+pulls are required.
+
+**Known release blocker:** the required Angular 19 lockfile currently reports
+7 production dependency findings (4 high, 3 moderate). The registry's suggested
+fix upgrades Angular beyond the tutorial's major version. No breaking upgrade
+or audit exception is applied silently. Functional builds can pass while the
+security gate correctly fails; publishing remains disabled by that failed gate
+until the dependency requirement is resolved.

@@ -1,0 +1,60 @@
+name: Build bundle
+
+on:
+  # A push workflow is loaded from the pushed branch. Source orphan branches
+  # do not contain this main-only file, so a source-branch push trigger cannot work.
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: snip-bundle-main
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      # GITHUB_TOKEN pushes do not trigger another push workflow. Dispatch it
+      # explicitly after a changed release; no long-lived PAT is needed.
+      actions: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.4'
+      - name: Configure commit identity
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Assemble and verify before pushing
+        id: build
+        run: |
+          echo "before=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          node scripts/build-bundle.mjs
+          npm --prefix frontend test -- --watch=false --browsers=ChromeHeadless --progress=false
+          node scripts/smoke-test.mjs
+          npm --prefix frontend audit --omit=dev --audit-level=high
+      - name: Push generated release and pointers
+        run: node scripts/build-bundle.mjs --push
+      - name: Dispatch image pipeline for changed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ steps.build.outputs.before }}
+        run: |
+          if [ "$BEFORE" != "$(git rev-parse HEAD)" ]; then
+            gh workflow run docker.yml --ref main
+          else
+            echo 'Unchanged release; no image dispatch.'
+          fi

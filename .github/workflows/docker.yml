@@ -1,0 +1,134 @@
+name: Build and push image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # This is the gitlink itself, not bundle/**.
+      - bundle
+      - .github/workflows/docker.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: snip-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.4'
+      - name: Test the exact pinned release
+        run: |
+          npm --prefix frontend ci --no-fund --no-audit
+          npm --prefix frontend run build -- --progress=false
+          npm --prefix frontend test -- --watch=false --browsers=ChromeHeadless --progress=false
+          node scripts/smoke-test.mjs
+      - name: Production dependency security gate
+        run: npm --prefix frontend audit --omit=dev --audit-level=high
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ./bundle
+          file: ./bundle/Dockerfile
+          load: true
+          push: false
+          tags: snip:verified
+      - name: Smoke-test the built container
+        run: |
+          docker run --detach --name snip-smoke \
+            -p 127.0.0.1:3000:3000 \
+            -e BASE_URL=http://127.0.0.1:3000 snip:verified
+          node scripts/smoke-test.mjs --url http://127.0.0.1:3000
+      - name: Container logs and cleanup
+        if: always()
+        run: |
+          if docker container inspect snip-smoke >/dev/null 2>&1; then
+            docker logs snip-smoke
+            docker rm --force snip-smoke
+          fi
+      - name: Scan the exact local image before publication
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          version: v0.68.1
+          image-ref: snip:verified
+          scan-type: image
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+      - name: Save the tested and scanned image
+        run: docker save snip:verified -o "$RUNNER_TEMP/snip-image.tar"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: snip-image-${{ github.sha }}
+          path: ${{ runner.temp }}/snip-image.tar
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+  publish:
+    needs: [verify, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: snip-image-${{ github.sha }}
+          path: ${{ runner.temp }}
+      - name: Load the verified image without rebuilding
+        run: docker load -i "$RUNNER_TEMP/snip-image.tar"
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push only the image that passed both gates
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            docker tag snip:verified "$tag"
+            docker push "$tag"
+          done <<< "$TAGS"

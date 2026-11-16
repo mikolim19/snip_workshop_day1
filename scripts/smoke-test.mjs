@@ -11,6 +11,26 @@ const bundle = join(root, 'bundle');
 let child;
 let output = '';
 
+function git(args, cwd = root) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
+function verifyPins() {
+  const sources = JSON.parse(readFileSync(join(bundle, 'sources.json')));
+  for (const component of ['backend', 'frontend', 'cli', 'bundle']) {
+    const pinned = git(['ls-tree', 'HEAD', component]).split(/\s+/)[2];
+    assert.equal(git(['rev-parse', 'HEAD'], join(root, component)), pinned, `${component} gitlink differs`);
+    if (component !== 'bundle') assert.equal(sources[component], pinned, `${component} manifest differs`);
+  }
+  for (const [component, file] of [['backend', 'server.js'], ['cli', 'cli.js']]) {
+    assert.equal(git(['show', `HEAD:${file}`], bundle), git(['show', `HEAD:${file}`], join(root, component)));
+  }
+  console.log('PASS: all four gitlinks, source manifest, and unchanged server/CLI match pinned revisions.');
+}
+
 async function unusedPort() {
   const server = createServer();
   await new Promise((resolve, reject) => {
@@ -99,6 +119,7 @@ try {
   if (args.length && (args.length !== 2 || args[0] !== '--url')) {
     throw new Error('Usage: node scripts/smoke-test.mjs [--url http://127.0.0.1:3000]');
   }
+  verifyPins();
   let url = args[1];
   if (!url) {
     const port = await unusedPort();

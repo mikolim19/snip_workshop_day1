@@ -1,6 +1,6 @@
 # Snip
 
-One in-memory Bun URL-shortening API, two clients: an Angular 19 web app and a
+One in-memory Bun URL-shortening API, two clients: an Angular 22 web app and a
 zero-dependency Node CLI. Restarting the API intentionally clears all links.
 
 ## Architecture
@@ -12,7 +12,7 @@ component commits, not floating branch names.
 | Branch / submodule | Contents |
 | --- | --- |
 | `backend` | Bun 1.x API, `server.js`, no npm dependencies |
-| `frontend` | Angular 19 standalone app and typed HttpClient service |
+| `frontend` | Angular 22 standalone app and typed HttpClient service |
 | `cli` | CommonJS `cli.js`, Node 20+ global fetch, shell wrappers |
 | `bundle` | GENERATED server, built UI, CLI, Dockerfile and Railway configuration |
 | `main` | Submodule pointers, documentation, release tooling and CI |
@@ -30,7 +30,9 @@ ISO timestamp. CORS is open and OPTIONS preflight is supported.
 
 ## Clone and run
 
-Requires Git, Bun 1.x, and Node 20+ with npm. Node 24 is used for release builds.
+Requires Git, Bun 1.x, and Node 24.22.3 with npm (pinned in `.nvmrc`) for frontend
+and release builds. Angular 22 requires Node `^22.22.3`, `^24.15.0`, or `>=26.0.0`;
+the CLI alone still supports Node 20+.
 
 ```powershell
 git clone --recurse-submodules https://github.com/mikolim19/snip_workshop_day1.git
@@ -145,7 +147,9 @@ Independent jobs test the frontend/API/CLI and build, smoke-test and Trivy-scan
 the image. High/critical production dependency or image findings block publication,
 including unfixed image findings. Actions are pinned by commit SHA. Only the
 publish job can write packages; it loads the already-tested image artifact rather
-than rebuilding it after the scan.
+than rebuilding it after the scan. After publishing, it pulls both registry tags,
+checks that their image IDs match the scanned artifact, and runs the API/UI/CLI
+smoke checks against that published image.
 
 Successful runs publish:
 
@@ -159,9 +163,6 @@ These are intended tags, not evidence that a publish succeeded. Check the
 The first GHCR package may be private; change package visibility if anonymous
 pulls are required.
 
-**Known release blocker:** the required Angular 19 lockfile currently reports
-7 production dependency findings (4 high, 3 moderate). The registry's suggested
-fix upgrades Angular beyond the tutorial's major version. No breaking upgrade
-or audit exception is applied silently. Functional builds can pass while the
-security gate correctly fails; publishing remains disabled by that failed gate
-until the dependency requirement is resolved.
+Angular 22 replaces the tutorial's original Angular 19 requirement with the
+user's approval. Dependency and image gates remain mandatory; no audit exception
+or security-gate bypass is applied for the upgrade.
